@@ -23,7 +23,7 @@ class Tracker(object):
 
         self.server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        self.server.bind(('0.0.0.0', TRACKER_PORT))
+        self.server.bind(('', TRACKER_PORT))
         self.server.listen(5)
         self.running = True
         print 'Tracker aberto na porta', TRACKER_PORT
