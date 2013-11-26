@@ -177,8 +177,10 @@ class Peer(TrackerPeer):
 
     def receive_disconnect_leader(self, msg):
         self.logger.log('Líder antigo desconectou do anél. Assumirei como novo líder')
+        old_leader = self.leader
         self.leader = self.this
-        self.propagate_leader_disconnect(self.this)
+        if self.next != old_leader:
+            self.propagate_leader_disconnect(self.this)
         self.info_print()
 
     def close_extra(self, notify_tracker=True):
