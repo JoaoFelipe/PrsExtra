@@ -7,6 +7,7 @@ import sys
 import functools
 import traceback
 import time
+from optparse import OptionParser
 from base import (
     Client,
     Logger,
@@ -16,7 +17,7 @@ from base import (
 )
 from tracker import (
     CLOSE_PEERS,
-    DEFAULT_TRACKER_IP,
+    SOCKET_LISTENER_IP,
     DEFAULT_TRACKER_PORT,
 )
 
@@ -24,7 +25,7 @@ from tracker import (
 # Essa classe trata da conexão entre peer e tracker e a formação do anél
 class TrackerPeer(object):
 
-    def __init__(self, tracker_ip=DEFAULT_TRACKER_IP, tracker_port=DEFAULT_TRACKER_PORT):
+    def __init__(self, tracker_ip='127.0.0.1', tracker_port=DEFAULT_TRACKER_PORT):
         self.this = None
         self.next = None
         self.tracker_ip = tracker_ip
@@ -37,7 +38,7 @@ class TrackerPeer(object):
                 
         self.server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        self.server.bind((self.tracker_ip, self.this[1]))
+        self.server.bind((SOCKET_LISTENER_IP, self.this[1]))
         self.server.listen(5)
         
         self.listeners = {
@@ -46,7 +47,7 @@ class TrackerPeer(object):
         }
 
         self.running = True
-        self.logger.log(u'Servidor do Peer aberto em {0}'.format(pretty_address((socket.gethostname(), self.this[1]))))
+        self.logger.log(u'Servidor do Peer aberto em {0}'.format(pretty_address((socket.gethostbyname(socket.gethostname()), self.this[1]))))
         self.logger.add_level()
 
     def send_message_to_tracker(self, message):
@@ -96,9 +97,10 @@ class TrackerPeer(object):
 # Essa classe trata da propagação do tempo/lider no anel
 class Peer(TrackerPeer):
 
-    def __init__(self, tracker_ip=DEFAULT_TRACKER_IP, tracker_port=DEFAULT_TRACKER_PORT, delta_time=0.0):
+    def __init__(self, tracker_ip='127.0.0.1', tracker_port=DEFAULT_TRACKER_PORT, delta_time=0.0, tolerance=0.5):
         TrackerPeer.__init__(self, tracker_ip, tracker_port)
-        self.peer_time = time.time()
+        self.tolerance = tolerance
+        self.peer_time = time.time
         self.delta_time = delta_time
             
         self.leader = self.this
@@ -117,7 +119,7 @@ class Peer(TrackerPeer):
         self.logger.log(u'Hora: {0}'.format(self.get_time()))
 
     def get_time(self):
-        return self.peer_time + self.delta_time
+        return self.peer_time() + self.delta_time
     
     def propagate_leader(self, original):
         self.logger.log(u'Propagando líder')
@@ -156,12 +158,12 @@ class Peer(TrackerPeer):
             self.info_print()
             return
 
-        if received_time > current_time:
+        if received_time - current_time >= self.tolerance:
             self.logger.log(u'Tempo recebido maior do que tempo atual. Atualizando líder')
             self.leader = msg[u'leader']
             self.delta_time += received_time - current_time
             self.propagate_leader(msg[u'original'])
-        elif received_time == current_time:
+        elif abs(received_time - current_time) <= self.tolerance:
             self.propagate_leader(msg[u'original'])
         else:
             self.logger.log(u'Este é o novo líder do anél. Propagando informação')
@@ -192,27 +194,50 @@ class Peer(TrackerPeer):
         self.info_print()
 
     def close_extra(self, notify_tracker=True):
-        if self.leader == self.this:
+        if self.leader == self.this and notify_tracker:
             self.disconnect_leader()
 
 
+def parse_options():
+    usage = u"%prog [OPÇÕES]"
+    parser = OptionParser(usage)
+    parser.add_option(
+        '-i',
+        '--ip',
+        action = 'store',
+        type = 'string',
+        dest = 'ip',
+        default = socket.gethostbyname(socket.gethostname()),
+    )
+    parser.add_option(
+        '-p',
+        '--port',
+        action = 'store',
+        type = 'int',
+        dest = 'port',
+        default = DEFAULT_TRACKER_PORT,
+    )
+    parser.add_option(
+        '-d',
+        '--deltatime',
+        action = 'store',
+        type = 'float',
+        dest = 'deltatime',
+        default = 0.0,
+    )
+    parser.add_option(
+        '-t',
+        '--tolerance',
+        action = 'store',
+        type = 'float',
+        dest = 'tolerance',
+        default = 0.5,
+    )
+    return parser.parse_args()
+
 if __name__ == u'__main__':
-    tracker_ip = DEFAULT_TRACKER_IP
-    tracker_port = DEFAULT_TRACKER_PORT
-    delta_time = 0.0
-
-    if u'-ip' in sys.argv:
-        tracker_ip = sys.argv[2]
-        if u'-dt' in sys.argv:
-            delta_time = sys.argv[4]
-    elif u'-pt' in sys.argv:
-        tracker_port = sys.argv[2]
-        if u'-dt' in sys.argv:
-            delta_time = sys.argv[4]
-    elif u'-dt' in sys.argv:
-            delta_time = sys.argv[2]
-
-    peer = Peer(tracker_ip, tracker_port, delta_time)
+    options, args = parse_options()
+    peer = Peer(options.ip, options.port, options.deltatime, options.tolerance)
     signal.signal(signal.SIGINT, functools.partial(signal_handler, peer))
     try:
         peer.loop()
